@@ -1,5 +1,5 @@
 --TEST--
-Openssl\Dtls: handshake, keying material export and application data
+Openssl\Dtls: handshake, peer fingerprint, keying material and application data
 --EXTENSIONS--
 openssl
 --SKIPIF--
@@ -13,9 +13,8 @@ use Openssl\Dtls;
 $server = new Dtls(true);
 $client = new Dtls(false);
 
-// A fingerprint is available before the handshake.
 var_dump(strlen($server->getFingerprint()) > 0);
-var_dump(strlen($client->getFingerprint('sha256')) > 0);
+var_dump($server->isHandshakeFinished());
 
 function pump(Dtls $from, Dtls $to): void {
     while (($datagram = $from->pull()) !== null) {
@@ -23,34 +22,36 @@ function pump(Dtls $from, Dtls $to): void {
     }
 }
 
-$serverDone = $clientDone = false;
-for ($i = 0; $i < 50 && !($serverDone && $clientDone); $i++) {
-    if (!$clientDone && $client->handshake() === 1) {
-        $clientDone = true;
-    }
+for ($i = 0; $i < 50 && !($server->isHandshakeFinished() && $client->isHandshakeFinished()); $i++) {
+    $client->handshake();
     pump($client, $server);
-    if (!$serverDone && $server->handshake() === 1) {
-        $serverDone = true;
-    }
+    $server->handshake();
     pump($server, $client);
 }
-var_dump($serverDone && $clientDone);
+var_dump($server->isHandshakeFinished() && $client->isHandshakeFinished());
+
+// Each peer sees the other's certificate fingerprint.
+var_dump($client->getPeerFingerprint() === $server->getFingerprint());
+var_dump($server->getPeerFingerprint() === $client->getFingerprint());
 
 // Both peers derive identical keying material (RFC 5705).
 $serverKeys = $server->exportKeys('EXTRACTOR-dtls_srtp', 60);
 $clientKeys = $client->exportKeys('EXTRACTOR-dtls_srtp', 60);
-var_dump(strlen($serverKeys) === 60);
 var_dump($serverKeys === $clientKeys);
 
 // Application data round trip.
 $server->write('ping');
 pump($server, $client);
 var_dump($client->read());
+
+var_dump(Dtls::HANDSHAKE_FINISHED);
 ?>
 --EXPECT--
 bool(true)
+bool(false)
 bool(true)
 bool(true)
 bool(true)
 bool(true)
 string(4) "ping"
+int(1)

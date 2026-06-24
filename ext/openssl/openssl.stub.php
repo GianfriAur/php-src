@@ -64,9 +64,20 @@ namespace Openssl {
      */
     final class Dtls
     {
+        /** @cvalue PHP_OPENSSL_DTLS_HANDSHAKE_ERROR */
+        public const int HANDSHAKE_ERROR = UNKNOWN;
+        /** @cvalue PHP_OPENSSL_DTLS_HANDSHAKE_CONTINUE */
+        public const int HANDSHAKE_CONTINUE = UNKNOWN;
+        /** @cvalue PHP_OPENSSL_DTLS_HANDSHAKE_FINISHED */
+        public const int HANDSHAKE_FINISHED = UNKNOWN;
+
         public function __construct(bool $isServer = false) {}
 
         public function getFingerprint(?string $digestAlgo = null): string {}
+
+        public function getPeerFingerprint(?string $digestAlgo = null): ?string {}
+
+        public function isHandshakeFinished(): bool {}
 
         public function handshake(): int {}
 

@@ -55,6 +55,11 @@
 
 ZEND_DECLARE_MODULE_GLOBALS(openssl)
 
+/* Openssl\Dtls::handshake() result codes (must precede the generated arginfo). */
+#define PHP_OPENSSL_DTLS_HANDSHAKE_ERROR    (-1)
+#define PHP_OPENSSL_DTLS_HANDSHAKE_CONTINUE 0
+#define PHP_OPENSSL_DTLS_HANDSHAKE_FINISHED 1
+
 #include "openssl_arginfo.h"
 
 /* OpenSSLException class */
@@ -689,6 +694,31 @@ static void php_openssl_dtls_free_object(zend_object *obj)
 	zend_object_std_dtor(&intern->std);
 }
 
+/* Certificates are validated by fingerprint at the application layer, so the
+   TLS layer accepts any peer certificate; requesting it merely makes it
+   available through getPeerFingerprint(). */
+static int php_openssl_dtls_verify_callback(int preverify_ok, X509_STORE_CTX *store)
+{
+	(void) preverify_ok;
+	(void) store;
+	return 1;
+}
+
+static bool php_openssl_dtls_fingerprint(X509 *cert, const EVP_MD *algo, char *out)
+{
+	unsigned char md[EVP_MAX_MD_SIZE];
+	unsigned int md_len = 0;
+
+	if (!X509_digest(cert, algo, md, &md_len)) {
+		return false;
+	}
+	out[0] = '\0';
+	for (unsigned int i = 0; i < md_len; i++) {
+		snprintf(out + i * 3, 4, "%02X%c", md[i], (i + 1 < md_len) ? ':' : '\0');
+	}
+	return true;
+}
+
 /* {{{ Create a DTLS endpoint (server when $isServer is true). */
 PHP_METHOD(Openssl_Dtls, __construct)
 {
@@ -706,6 +736,9 @@ PHP_METHOD(Openssl_Dtls, __construct)
 		zend_throw_exception(php_openssl_exception_ce, "Failed to create DTLS context", 0);
 		RETURN_THROWS();
 	}
+
+	SSL_CTX_set_verify(intern->ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+		php_openssl_dtls_verify_callback);
 
 	EVP_PKEY *pkey = EVP_PKEY_Q_keygen(NULL, NULL, "RSA", (size_t) 2048);
 	X509 *cert = X509_new();
@@ -785,23 +818,60 @@ PHP_METHOD(Openssl_Dtls, getFingerprint)
 		RETURN_THROWS();
 	}
 
-	unsigned char md[EVP_MAX_MD_SIZE];
-	unsigned int md_len = 0;
-	if (!X509_digest(intern->cert, algo, md, &md_len)) {
+	char out[3 * EVP_MAX_MD_SIZE];
+	if (!php_openssl_dtls_fingerprint(intern->cert, algo, out)) {
 		zend_throw_exception(php_openssl_exception_ce, "Failed to compute fingerprint", 0);
 		RETURN_THROWS();
-	}
-
-	char out[3 * EVP_MAX_MD_SIZE];
-	out[0] = '\0';
-	for (unsigned int i = 0; i < md_len; i++) {
-		snprintf(out + i * 3, 4, "%02X%c", md[i], (i + 1 < md_len) ? ':' : '\0');
 	}
 	RETURN_STRING(out);
 }
 /* }}} */
 
-/* {{{ Advance the handshake: 1 finished, 0 needs more I/O, -1 fatal error. */
+/* {{{ Return the peer certificate fingerprint, or null if none was received. */
+PHP_METHOD(Openssl_Dtls, getPeerFingerprint)
+{
+	zend_string *digest = NULL;
+
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_STR_OR_NULL(digest)
+	ZEND_PARSE_PARAMETERS_END();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	X509 *peer = SSL_get1_peer_certificate(intern->ssl);
+	if (peer == NULL) {
+		RETURN_NULL();
+	}
+
+	const EVP_MD *algo = digest != NULL ? EVP_get_digestbyname(ZSTR_VAL(digest)) : EVP_sha256();
+	if (algo == NULL) {
+		X509_free(peer);
+		zend_throw_exception(php_openssl_exception_ce, "Unknown digest algorithm", 0);
+		RETURN_THROWS();
+	}
+
+	char out[3 * EVP_MAX_MD_SIZE];
+	bool ok = php_openssl_dtls_fingerprint(peer, algo, out);
+	X509_free(peer);
+	if (!ok) {
+		zend_throw_exception(php_openssl_exception_ce, "Failed to compute fingerprint", 0);
+		RETURN_THROWS();
+	}
+	RETURN_STRING(out);
+}
+/* }}} */
+
+/* {{{ Whether the handshake has completed. */
+PHP_METHOD(Openssl_Dtls, isHandshakeFinished)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	RETURN_BOOL(SSL_is_init_finished(intern->ssl));
+}
+/* }}} */
+
+/* {{{ Advance the handshake; returns one of the HANDSHAKE_* constants. */
 PHP_METHOD(Openssl_Dtls, handshake)
 {
 	ZEND_PARSE_PARAMETERS_NONE();
@@ -809,14 +879,14 @@ PHP_METHOD(Openssl_Dtls, handshake)
 	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
 	int ret = SSL_do_handshake(intern->ssl);
 	if (ret == 1) {
-		RETURN_LONG(1);
+		RETURN_LONG(PHP_OPENSSL_DTLS_HANDSHAKE_FINISHED);
 	}
 
 	int err = SSL_get_error(intern->ssl, ret);
 	if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-		RETURN_LONG(0);
+		RETURN_LONG(PHP_OPENSSL_DTLS_HANDSHAKE_CONTINUE);
 	}
-	RETURN_LONG(-1);
+	RETURN_LONG(PHP_OPENSSL_DTLS_HANDSHAKE_ERROR);
 }
 /* }}} */
 

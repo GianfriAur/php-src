@@ -1,5 +1,5 @@
 /* This is a generated file, edit openssl.stub.php instead.
- * Stub hash: f5ae04f5d94a9b8293c102c0ecfb2e6d2233b0a8 */
+ * Stub hash: 6ada2f397d3604c7edcc1adeedc773997c91c84d */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_openssl_x509_export_to_file, 0, 2, _IS_BOOL, 0)
 	ZEND_ARG_OBJ_TYPE_MASK(0, certificate, OpenSSLCertificate, MAY_BE_STRING, NULL)
@@ -454,6 +454,12 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Dtls_getFingerprin
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, digestAlgo, IS_STRING, 1, "null")
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Dtls_getPeerFingerprint, 0, 0, IS_STRING, 1)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, digestAlgo, IS_STRING, 1, "null")
+ZEND_END_ARG_INFO()
+
+#define arginfo_class_Openssl_Dtls_isHandshakeFinished arginfo_class_Openssl_Session_isResumable
+
 #define arginfo_class_Openssl_Dtls_handshake arginfo_class_Openssl_Session_getTimeout
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Dtls_feed, 0, 1, IS_LONG, 0)
@@ -555,6 +561,8 @@ ZEND_METHOD(Openssl_Session, __serialize);
 ZEND_METHOD(Openssl_Session, __unserialize);
 ZEND_METHOD(Openssl_Dtls, __construct);
 ZEND_METHOD(Openssl_Dtls, getFingerprint);
+ZEND_METHOD(Openssl_Dtls, getPeerFingerprint);
+ZEND_METHOD(Openssl_Dtls, isHandshakeFinished);
 ZEND_METHOD(Openssl_Dtls, handshake);
 ZEND_METHOD(Openssl_Dtls, feed);
 ZEND_METHOD(Openssl_Dtls, pull);
@@ -660,6 +668,8 @@ static const zend_function_entry class_Openssl_Session_methods[] = {
 static const zend_function_entry class_Openssl_Dtls_methods[] = {
 	ZEND_ME(Openssl_Dtls, __construct, arginfo_class_Openssl_Dtls___construct, ZEND_ACC_PUBLIC)
 	ZEND_ME(Openssl_Dtls, getFingerprint, arginfo_class_Openssl_Dtls_getFingerprint, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, getPeerFingerprint, arginfo_class_Openssl_Dtls_getPeerFingerprint, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, isHandshakeFinished, arginfo_class_Openssl_Dtls_isHandshakeFinished, ZEND_ACC_PUBLIC)
 	ZEND_ME(Openssl_Dtls, handshake, arginfo_class_Openssl_Dtls_handshake, ZEND_ACC_PUBLIC)
 	ZEND_ME(Openssl_Dtls, feed, arginfo_class_Openssl_Dtls_feed, ZEND_ACC_PUBLIC)
 	ZEND_ME(Openssl_Dtls, pull, arginfo_class_Openssl_Dtls_pull, ZEND_ACC_PUBLIC)
@@ -938,6 +948,24 @@ static zend_class_entry *register_class_Openssl_Dtls(void)
 
 	INIT_NS_CLASS_ENTRY(ce, "Openssl", "Dtls", class_Openssl_Dtls_methods);
 	class_entry = zend_register_internal_class_with_flags(&ce, NULL, ZEND_ACC_FINAL|ZEND_ACC_NO_DYNAMIC_PROPERTIES);
+
+	zval const_HANDSHAKE_ERROR_value;
+	ZVAL_LONG(&const_HANDSHAKE_ERROR_value, PHP_OPENSSL_DTLS_HANDSHAKE_ERROR);
+	zend_string *const_HANDSHAKE_ERROR_name = zend_string_init_interned("HANDSHAKE_ERROR", sizeof("HANDSHAKE_ERROR") - 1, true);
+	zend_declare_typed_class_constant(class_entry, const_HANDSHAKE_ERROR_name, &const_HANDSHAKE_ERROR_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
+	zend_string_release_ex(const_HANDSHAKE_ERROR_name, true);
+
+	zval const_HANDSHAKE_CONTINUE_value;
+	ZVAL_LONG(&const_HANDSHAKE_CONTINUE_value, PHP_OPENSSL_DTLS_HANDSHAKE_CONTINUE);
+	zend_string *const_HANDSHAKE_CONTINUE_name = zend_string_init_interned("HANDSHAKE_CONTINUE", sizeof("HANDSHAKE_CONTINUE") - 1, true);
+	zend_declare_typed_class_constant(class_entry, const_HANDSHAKE_CONTINUE_name, &const_HANDSHAKE_CONTINUE_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
+	zend_string_release_ex(const_HANDSHAKE_CONTINUE_name, true);
+
+	zval const_HANDSHAKE_FINISHED_value;
+	ZVAL_LONG(&const_HANDSHAKE_FINISHED_value, PHP_OPENSSL_DTLS_HANDSHAKE_FINISHED);
+	zend_string *const_HANDSHAKE_FINISHED_name = zend_string_init_interned("HANDSHAKE_FINISHED", sizeof("HANDSHAKE_FINISHED") - 1, true);
+	zend_declare_typed_class_constant(class_entry, const_HANDSHAKE_FINISHED_name, &const_HANDSHAKE_FINISHED_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
+	zend_string_release_ex(const_HANDSHAKE_FINISHED_name, true);
 
 	return class_entry;
 }
