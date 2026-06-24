@@ -1,5 +1,5 @@
 /* This is a generated file, edit openssl.stub.php instead.
- * Stub hash: 6ada2f397d3604c7edcc1adeedc773997c91c84d */
+ * Stub hash: c92442c0458c696429f073c577683283c6594700 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_openssl_x509_export_to_file, 0, 2, _IS_BOOL, 0)
 	ZEND_ARG_OBJ_TYPE_MASK(0, certificate, OpenSSLCertificate, MAY_BE_STRING, NULL)
@@ -406,8 +406,6 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_openssl_password_verify, 0, 3, _
 ZEND_END_ARG_INFO()
 #endif
 
-#define arginfo_openssl_dtls_self_test arginfo_openssl_get_cert_locations
-
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_Openssl_Psk___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, psk, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, identity, IS_STRING, 1, "null")
@@ -448,6 +446,8 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_Openssl_Dtls___construct, 0, 0, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, isServer, _IS_BOOL, 0, "false")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, certificate, IS_STRING, 1, "null")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, privateKey, IS_STRING, 1, "null")
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Dtls_getFingerprint, 0, 0, IS_STRING, 0)
@@ -546,7 +546,6 @@ ZEND_FUNCTION(openssl_get_cert_locations);
 ZEND_FUNCTION(openssl_password_hash);
 ZEND_FUNCTION(openssl_password_verify);
 #endif
-ZEND_FUNCTION(openssl_dtls_self_test);
 ZEND_METHOD(Openssl_Psk, __construct);
 ZEND_METHOD(Openssl_Session, export);
 ZEND_METHOD(Openssl_Session, import);
@@ -641,7 +640,6 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(openssl_password_hash, arginfo_openssl_password_hash)
 	ZEND_FE(openssl_password_verify, arginfo_openssl_password_verify)
 #endif
-	ZEND_FE(openssl_dtls_self_test, arginfo_openssl_dtls_self_test)
 	ZEND_FE_END
 };
 
@@ -966,6 +964,11 @@ static zend_class_entry *register_class_Openssl_Dtls(void)
 	zend_string *const_HANDSHAKE_FINISHED_name = zend_string_init_interned("HANDSHAKE_FINISHED", sizeof("HANDSHAKE_FINISHED") - 1, true);
 	zend_declare_typed_class_constant(class_entry, const_HANDSHAKE_FINISHED_name, &const_HANDSHAKE_FINISHED_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
 	zend_string_release_ex(const_HANDSHAKE_FINISHED_name, true);
+
+
+	zend_add_parameter_attribute(zend_hash_str_find_ptr(&class_entry->function_table, "__construct", sizeof("__construct") - 1), 1, ZSTR_KNOWN(ZEND_STR_SENSITIVEPARAMETER), 0);
+
+	zend_add_parameter_attribute(zend_hash_str_find_ptr(&class_entry->function_table, "__construct", sizeof("__construct") - 1), 2, ZSTR_KNOWN(ZEND_STR_SENSITIVEPARAMETER), 0);
 
 	return class_entry;
 }

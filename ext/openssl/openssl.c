@@ -51,7 +51,6 @@
 #include <openssl/ssl.h>
 #include <openssl/pkcs12.h>
 #include <openssl/cms.h>
-#include <openssl/srtp.h>
 
 ZEND_DECLARE_MODULE_GLOBALS(openssl)
 
@@ -551,92 +550,6 @@ static const zend_module_dep openssl_deps[] = {
 	ZEND_MOD_END
 };
 #endif
-/* {{{ Experimental DTLS smoke test: build a DTLS context, a self-signed cert,
-   compute its SHA-256 fingerprint, set the SRTP profile and memory BIOs, and
-   return a diagnostic array. */
-PHP_FUNCTION(openssl_dtls_self_test)
-{
-	ZEND_PARSE_PARAMETERS_NONE();
-
-	array_init(return_value);
-	add_assoc_string(return_value, "openssl_version", OpenSSL_version(OPENSSL_VERSION));
-
-	SSL_CTX *ctx = SSL_CTX_new(DTLS_method());
-	if (ctx == NULL) {
-		add_assoc_string(return_value, "error", "SSL_CTX_new(DTLS_method) failed");
-		add_assoc_bool(return_value, "success", 0);
-		return;
-	}
-
-	EVP_PKEY *pkey = EVP_PKEY_Q_keygen(NULL, NULL, "RSA", (size_t) 2048);
-	X509 *cert = X509_new();
-	bool cert_ok = false;
-	char fingerprint[3 * EVP_MAX_MD_SIZE] = {0};
-
-	if (pkey != NULL && cert != NULL) {
-		ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
-		X509_gmtime_adj(X509_getm_notBefore(cert), 0);
-		X509_gmtime_adj(X509_getm_notAfter(cert), (long) 60 * 60 * 24 * 30);
-		X509_set_pubkey(cert, pkey);
-
-		X509_NAME *name = X509_get_subject_name(cert);
-		X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-			(const unsigned char *) "php-webrtc-dtls", -1, -1, 0);
-		X509_set_issuer_name(cert, name);
-
-		if (X509_sign(cert, pkey, EVP_sha256())) {
-			unsigned char md[EVP_MAX_MD_SIZE];
-			unsigned int md_len = 0;
-			if (X509_digest(cert, EVP_sha256(), md, &md_len)) {
-				for (unsigned int i = 0; i < md_len; i++) {
-					snprintf(fingerprint + i * 3, 4, "%02X%c",
-						md[i], (i + 1 < md_len) ? ':' : '\0');
-				}
-				cert_ok = true;
-			}
-		}
-
-		SSL_CTX_use_certificate(ctx, cert);
-		SSL_CTX_use_PrivateKey(ctx, pkey);
-	}
-	add_assoc_string(return_value, "fingerprint", fingerprint);
-
-	int srtp_ok = SSL_CTX_set_tlsext_use_srtp(ctx, "SRTP_AES128_CM_SHA1_80");
-	add_assoc_string(return_value, "use_srtp", srtp_ok == 0 ? "ok" : "fail");
-
-	SSL *ssl = SSL_new(ctx);
-	BIO *rbio = BIO_new(BIO_s_mem());
-	BIO *wbio = BIO_new(BIO_s_mem());
-	bool bio_ok = false;
-	if (ssl != NULL && rbio != NULL && wbio != NULL) {
-		SSL_set_bio(ssl, rbio, wbio);
-		SSL_set_accept_state(ssl);
-		bio_ok = true;
-	} else {
-		if (rbio != NULL) {
-			BIO_free(rbio);
-		}
-		if (wbio != NULL) {
-			BIO_free(wbio);
-		}
-	}
-	add_assoc_string(return_value, "memory_bio", bio_ok ? "ok" : "fail");
-
-	add_assoc_bool(return_value, "success", cert_ok && srtp_ok == 0 && bio_ok);
-
-	if (ssl != NULL) {
-		SSL_free(ssl);
-	}
-	if (cert != NULL) {
-		X509_free(cert);
-	}
-	if (pkey != NULL) {
-		EVP_PKEY_free(pkey);
-	}
-	SSL_CTX_free(ctx);
-}
-/* }}} */
-
 /* Openssl\Dtls: a stateful DTLS endpoint. The object owns the SSL object, its
    memory BIOs and an auto-generated certificate; the application drives all
    packet I/O through feed()/pull(), so DTLS can run over any datagram transport. */
@@ -719,29 +632,11 @@ static bool php_openssl_dtls_fingerprint(X509 *cert, const EVP_MD *algo, char *o
 	return true;
 }
 
-/* {{{ Create a DTLS endpoint (server when $isServer is true). */
-PHP_METHOD(Openssl_Dtls, __construct)
+static int php_openssl_dtls_generate_cert(X509 **out_cert, EVP_PKEY **out_pkey)
 {
-	bool is_server = false;
-
-	ZEND_PARSE_PARAMETERS_START(0, 1)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_BOOL(is_server)
-	ZEND_PARSE_PARAMETERS_END();
-
-	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
-
-	intern->ctx = SSL_CTX_new(DTLS_method());
-	if (intern->ctx == NULL) {
-		zend_throw_exception(php_openssl_exception_ce, "Failed to create DTLS context", 0);
-		RETURN_THROWS();
-	}
-
-	SSL_CTX_set_verify(intern->ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-		php_openssl_dtls_verify_callback);
-
 	EVP_PKEY *pkey = EVP_PKEY_Q_keygen(NULL, NULL, "RSA", (size_t) 2048);
 	X509 *cert = X509_new();
+
 	if (pkey == NULL || cert == NULL) {
 		if (pkey != NULL) {
 			EVP_PKEY_free(pkey);
@@ -749,8 +644,7 @@ PHP_METHOD(Openssl_Dtls, __construct)
 		if (cert != NULL) {
 			X509_free(cert);
 		}
-		zend_throw_exception(php_openssl_exception_ce, "Failed to generate DTLS credentials", 0);
-		RETURN_THROWS();
+		return 0;
 	}
 
 	ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
@@ -766,12 +660,98 @@ PHP_METHOD(Openssl_Dtls, __construct)
 	if (!X509_sign(cert, pkey, EVP_sha256())) {
 		EVP_PKEY_free(pkey);
 		X509_free(cert);
-		zend_throw_exception(php_openssl_exception_ce, "Failed to sign DTLS certificate", 0);
+		return 0;
+	}
+
+	*out_cert = cert;
+	*out_pkey = pkey;
+	return 1;
+}
+
+static int php_openssl_dtls_load_cert(const zend_string *cert_pem, const zend_string *key_pem,
+		X509 **out_cert, EVP_PKEY **out_pkey)
+{
+	BIO *cbio = BIO_new_mem_buf(ZSTR_VAL(cert_pem), (int) ZSTR_LEN(cert_pem));
+	X509 *cert = cbio != NULL ? PEM_read_bio_X509(cbio, NULL, NULL, NULL) : NULL;
+	if (cbio != NULL) {
+		BIO_free(cbio);
+	}
+
+	BIO *kbio = BIO_new_mem_buf(ZSTR_VAL(key_pem), (int) ZSTR_LEN(key_pem));
+	EVP_PKEY *pkey = kbio != NULL ? PEM_read_bio_PrivateKey(kbio, NULL, NULL, NULL) : NULL;
+	if (kbio != NULL) {
+		BIO_free(kbio);
+	}
+
+	if (cert == NULL || pkey == NULL) {
+		if (cert != NULL) {
+			X509_free(cert);
+		}
+		if (pkey != NULL) {
+			EVP_PKEY_free(pkey);
+		}
+		return 0;
+	}
+
+	*out_cert = cert;
+	*out_pkey = pkey;
+	return 1;
+}
+
+/* {{{ Create a DTLS endpoint (server when $isServer is true). A certificate and
+   private key may be supplied as PEM strings; otherwise an ephemeral self-signed
+   pair is generated. */
+PHP_METHOD(Openssl_Dtls, __construct)
+{
+	bool is_server = false;
+	zend_string *cert_pem = NULL;
+	zend_string *key_pem = NULL;
+
+	ZEND_PARSE_PARAMETERS_START(0, 3)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_BOOL(is_server)
+		Z_PARAM_STR_OR_NULL(cert_pem)
+		Z_PARAM_STR_OR_NULL(key_pem)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if ((cert_pem == NULL) != (key_pem == NULL)) {
+		zend_throw_exception(php_openssl_exception_ce,
+			"Certificate and private key must be provided together", 0);
 		RETURN_THROWS();
 	}
 
-	SSL_CTX_use_certificate(intern->ctx, cert);
-	SSL_CTX_use_PrivateKey(intern->ctx, pkey);
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+
+	intern->ctx = SSL_CTX_new(DTLS_method());
+	if (intern->ctx == NULL) {
+		zend_throw_exception(php_openssl_exception_ce, "Failed to create DTLS context", 0);
+		RETURN_THROWS();
+	}
+
+	SSL_CTX_set_verify(intern->ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+		php_openssl_dtls_verify_callback);
+
+	X509 *cert = NULL;
+	EVP_PKEY *pkey = NULL;
+	if (cert_pem != NULL) {
+		if (!php_openssl_dtls_load_cert(cert_pem, key_pem, &cert, &pkey)) {
+			zend_throw_exception(php_openssl_exception_ce,
+				"Failed to parse certificate or private key", 0);
+			RETURN_THROWS();
+		}
+	} else if (!php_openssl_dtls_generate_cert(&cert, &pkey)) {
+		zend_throw_exception(php_openssl_exception_ce, "Failed to generate DTLS credentials", 0);
+		RETURN_THROWS();
+	}
+
+	if (SSL_CTX_use_certificate(intern->ctx, cert) != 1
+			|| SSL_CTX_use_PrivateKey(intern->ctx, pkey) != 1) {
+		X509_free(cert);
+		EVP_PKEY_free(pkey);
+		zend_throw_exception(php_openssl_exception_ce,
+			"Certificate and private key do not match", 0);
+		RETURN_THROWS();
+	}
 	intern->cert = cert;
 	intern->pkey = pkey;
 

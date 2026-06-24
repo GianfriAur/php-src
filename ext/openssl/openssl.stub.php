@@ -71,7 +71,7 @@ namespace Openssl {
         /** @cvalue PHP_OPENSSL_DTLS_HANDSHAKE_FINISHED */
         public const int HANDSHAKE_FINISHED = UNKNOWN;
 
-        public function __construct(bool $isServer = false) {}
+        public function __construct(bool $isServer = false, #[\SensitiveParameter] ?string $certificate = null, #[\SensitiveParameter] ?string $privateKey = null) {}
 
         public function getFingerprint(?string $digestAlgo = null): string {}
 
@@ -792,8 +792,5 @@ function openssl_get_cert_locations(): array {}
 function openssl_password_hash(string $algo, #[\SensitiveParameter] string $password, array $options = []): string {}
 function openssl_password_verify(string $algo, #[\SensitiveParameter] string $password, string $hash): bool {}
 #endif
-
-/** @return array<string, mixed> */
-function openssl_dtls_self_test(): array {}
 
 }
