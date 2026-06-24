@@ -632,6 +632,294 @@ PHP_FUNCTION(openssl_dtls_self_test)
 }
 /* }}} */
 
+/* Openssl\Dtls: a stateful DTLS endpoint. The object owns the SSL object, its
+   memory BIOs and an auto-generated certificate; the application drives all
+   packet I/O through feed()/pull(), so DTLS can run over any datagram transport. */
+
+typedef struct _php_openssl_dtls_object {
+	SSL_CTX  *ctx;
+	SSL      *ssl;
+	X509     *cert;
+	EVP_PKEY *pkey;
+	zend_object std;
+} php_openssl_dtls_object;
+
+static zend_class_entry *php_openssl_dtls_ce;
+static zend_object_handlers php_openssl_dtls_object_handlers;
+
+static inline php_openssl_dtls_object *php_openssl_dtls_from_obj(zend_object *obj)
+{
+	return (php_openssl_dtls_object *) ((char *) obj - offsetof(php_openssl_dtls_object, std));
+}
+
+#define Z_OPENSSL_DTLS_P(zv) php_openssl_dtls_from_obj(Z_OBJ_P(zv))
+
+static zend_object *php_openssl_dtls_create_object(zend_class_entry *ce)
+{
+	php_openssl_dtls_object *intern = zend_object_alloc(sizeof(php_openssl_dtls_object), ce);
+
+	intern->ctx = NULL;
+	intern->ssl = NULL;
+	intern->cert = NULL;
+	intern->pkey = NULL;
+
+	zend_object_std_init(&intern->std, ce);
+	object_properties_init(&intern->std, ce);
+	intern->std.handlers = &php_openssl_dtls_object_handlers;
+
+	return &intern->std;
+}
+
+static void php_openssl_dtls_free_object(zend_object *obj)
+{
+	php_openssl_dtls_object *intern = php_openssl_dtls_from_obj(obj);
+
+	if (intern->ssl != NULL) {
+		SSL_free(intern->ssl);
+	}
+	if (intern->cert != NULL) {
+		X509_free(intern->cert);
+	}
+	if (intern->pkey != NULL) {
+		EVP_PKEY_free(intern->pkey);
+	}
+	if (intern->ctx != NULL) {
+		SSL_CTX_free(intern->ctx);
+	}
+	zend_object_std_dtor(&intern->std);
+}
+
+/* {{{ Create a DTLS endpoint (server when $isServer is true). */
+PHP_METHOD(Openssl_Dtls, __construct)
+{
+	bool is_server = false;
+
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_BOOL(is_server)
+	ZEND_PARSE_PARAMETERS_END();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+
+	intern->ctx = SSL_CTX_new(DTLS_method());
+	if (intern->ctx == NULL) {
+		zend_throw_exception(php_openssl_exception_ce, "Failed to create DTLS context", 0);
+		RETURN_THROWS();
+	}
+
+	EVP_PKEY *pkey = EVP_PKEY_Q_keygen(NULL, NULL, "RSA", (size_t) 2048);
+	X509 *cert = X509_new();
+	if (pkey == NULL || cert == NULL) {
+		if (pkey != NULL) {
+			EVP_PKEY_free(pkey);
+		}
+		if (cert != NULL) {
+			X509_free(cert);
+		}
+		zend_throw_exception(php_openssl_exception_ce, "Failed to generate DTLS credentials", 0);
+		RETURN_THROWS();
+	}
+
+	ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+	X509_gmtime_adj(X509_getm_notBefore(cert), 0);
+	X509_gmtime_adj(X509_getm_notAfter(cert), (long) 60 * 60 * 24 * 365);
+	X509_set_pubkey(cert, pkey);
+
+	X509_NAME *name = X509_get_subject_name(cert);
+	X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+		(const unsigned char *) "PHP-DTLS", -1, -1, 0);
+	X509_set_issuer_name(cert, name);
+
+	if (!X509_sign(cert, pkey, EVP_sha256())) {
+		EVP_PKEY_free(pkey);
+		X509_free(cert);
+		zend_throw_exception(php_openssl_exception_ce, "Failed to sign DTLS certificate", 0);
+		RETURN_THROWS();
+	}
+
+	SSL_CTX_use_certificate(intern->ctx, cert);
+	SSL_CTX_use_PrivateKey(intern->ctx, pkey);
+	intern->cert = cert;
+	intern->pkey = pkey;
+
+	intern->ssl = SSL_new(intern->ctx);
+	BIO *rbio = BIO_new(BIO_s_mem());
+	BIO *wbio = BIO_new(BIO_s_mem());
+	if (intern->ssl == NULL || rbio == NULL || wbio == NULL) {
+		if (rbio != NULL) {
+			BIO_free(rbio);
+		}
+		if (wbio != NULL) {
+			BIO_free(wbio);
+		}
+		zend_throw_exception(php_openssl_exception_ce, "Failed to initialise DTLS session", 0);
+		RETURN_THROWS();
+	}
+
+	/* An empty memory read BIO must report "retry" (-1), not EOF (0). */
+	BIO_set_mem_eof_return(rbio, -1);
+	SSL_set_bio(intern->ssl, rbio, wbio);
+
+	if (is_server) {
+		SSL_set_accept_state(intern->ssl);
+	} else {
+		SSL_set_connect_state(intern->ssl);
+	}
+}
+/* }}} */
+
+/* {{{ Return the certificate fingerprint as uppercase colon-separated hex. */
+PHP_METHOD(Openssl_Dtls, getFingerprint)
+{
+	zend_string *digest = NULL;
+
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_STR_OR_NULL(digest)
+	ZEND_PARSE_PARAMETERS_END();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	const EVP_MD *algo = digest != NULL ? EVP_get_digestbyname(ZSTR_VAL(digest)) : EVP_sha256();
+	if (algo == NULL) {
+		zend_throw_exception(php_openssl_exception_ce, "Unknown digest algorithm", 0);
+		RETURN_THROWS();
+	}
+
+	unsigned char md[EVP_MAX_MD_SIZE];
+	unsigned int md_len = 0;
+	if (!X509_digest(intern->cert, algo, md, &md_len)) {
+		zend_throw_exception(php_openssl_exception_ce, "Failed to compute fingerprint", 0);
+		RETURN_THROWS();
+	}
+
+	char out[3 * EVP_MAX_MD_SIZE];
+	out[0] = '\0';
+	for (unsigned int i = 0; i < md_len; i++) {
+		snprintf(out + i * 3, 4, "%02X%c", md[i], (i + 1 < md_len) ? ':' : '\0');
+	}
+	RETURN_STRING(out);
+}
+/* }}} */
+
+/* {{{ Advance the handshake: 1 finished, 0 needs more I/O, -1 fatal error. */
+PHP_METHOD(Openssl_Dtls, handshake)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	int ret = SSL_do_handshake(intern->ssl);
+	if (ret == 1) {
+		RETURN_LONG(1);
+	}
+
+	int err = SSL_get_error(intern->ssl, ret);
+	if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+		RETURN_LONG(0);
+	}
+	RETURN_LONG(-1);
+}
+/* }}} */
+
+/* {{{ Inject an incoming datagram into the read BIO; returns bytes consumed. */
+PHP_METHOD(Openssl_Dtls, feed)
+{
+	char *data;
+	size_t data_len;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STRING(data, data_len)
+	ZEND_PARSE_PARAMETERS_END();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	RETURN_LONG(BIO_write(SSL_get_rbio(intern->ssl), data, (int) data_len));
+}
+/* }}} */
+
+/* {{{ Read a pending outgoing datagram from the write BIO, or null if none. */
+PHP_METHOD(Openssl_Dtls, pull)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	BIO *wbio = SSL_get_wbio(intern->ssl);
+	size_t pending = BIO_ctrl_pending(wbio);
+	if (pending == 0) {
+		RETURN_NULL();
+	}
+
+	zend_string *out = zend_string_alloc(pending, 0);
+	int n = BIO_read(wbio, ZSTR_VAL(out), (int) pending);
+	if (n <= 0) {
+		zend_string_release(out);
+		RETURN_NULL();
+	}
+	ZSTR_LEN(out) = (size_t) n;
+	ZSTR_VAL(out)[n] = '\0';
+	RETURN_STR(out);
+}
+/* }}} */
+
+/* {{{ Encrypt and queue application data; returns bytes written. */
+PHP_METHOD(Openssl_Dtls, write)
+{
+	char *data;
+	size_t data_len;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STRING(data, data_len)
+	ZEND_PARSE_PARAMETERS_END();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	RETURN_LONG(SSL_write(intern->ssl, data, (int) data_len));
+}
+/* }}} */
+
+/* {{{ Read decrypted application data, or false when none is available. */
+PHP_METHOD(Openssl_Dtls, read)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	char buf[4096];
+	int n = SSL_read(intern->ssl, buf, (int) sizeof(buf));
+	if (n <= 0) {
+		RETURN_FALSE;
+	}
+	RETURN_STRINGL(buf, n);
+}
+/* }}} */
+
+/* {{{ Export keying material (RFC 5705 / SSL_export_keying_material). */
+PHP_METHOD(Openssl_Dtls, exportKeys)
+{
+	char *label;
+	size_t label_len;
+	zend_long length;
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_STRING(label, label_len)
+		Z_PARAM_LONG(length)
+	ZEND_PARSE_PARAMETERS_END();
+
+	php_openssl_dtls_object *intern = Z_OPENSSL_DTLS_P(ZEND_THIS);
+	if (length <= 0 || length > 4096) {
+		RETURN_FALSE;
+	}
+	if (!SSL_is_init_finished(intern->ssl)) {
+		RETURN_FALSE;
+	}
+
+	zend_string *out = zend_string_alloc((size_t) length, 0);
+	if (SSL_export_keying_material(intern->ssl, (unsigned char *) ZSTR_VAL(out),
+			(size_t) length, label, label_len, NULL, 0, 0) != 1) {
+		zend_string_release(out);
+		RETURN_FALSE;
+	}
+	ZSTR_VAL(out)[length] = '\0';
+	RETURN_STR(out);
+}
+/* }}} */
+
 /* {{{ openssl_module_entry */
 zend_module_entry openssl_module_entry = {
 #if defined(HAVE_OPENSSL_ARGON2)
@@ -843,6 +1131,14 @@ PHP_INI_END()
 PHP_MINIT_FUNCTION(openssl)
 {
 	php_openssl_exception_ce = register_class_Openssl_OpensslException(zend_ce_exception);
+
+	php_openssl_dtls_ce = register_class_Openssl_Dtls();
+	php_openssl_dtls_ce->create_object = php_openssl_dtls_create_object;
+	memcpy(&php_openssl_dtls_object_handlers, &std_object_handlers, sizeof(zend_object_handlers));
+	php_openssl_dtls_object_handlers.offset = offsetof(php_openssl_dtls_object, std);
+	php_openssl_dtls_object_handlers.free_obj = php_openssl_dtls_free_object;
+	php_openssl_dtls_object_handlers.clone_obj = NULL;
+	php_openssl_dtls_ce->default_object_handlers = &php_openssl_dtls_object_handlers;
 
 	php_openssl_certificate_ce = register_class_OpenSSLCertificate();
 	php_openssl_certificate_ce->create_object = php_openssl_certificate_create_object;

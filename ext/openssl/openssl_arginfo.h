@@ -1,5 +1,5 @@
 /* This is a generated file, edit openssl.stub.php instead.
- * Stub hash: d20b941d40bad4e50a1c571a4c273179bd0f26bd */
+ * Stub hash: f5ae04f5d94a9b8293c102c0ecfb2e6d2233b0a8 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_openssl_x509_export_to_file, 0, 2, _IS_BOOL, 0)
 	ZEND_ARG_OBJ_TYPE_MASK(0, certificate, OpenSSLCertificate, MAY_BE_STRING, NULL)
@@ -446,6 +446,33 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Session___unserial
 	ZEND_ARG_TYPE_INFO(0, data, IS_ARRAY, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_class_Openssl_Dtls___construct, 0, 0, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, isServer, _IS_BOOL, 0, "false")
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Dtls_getFingerprint, 0, 0, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, digestAlgo, IS_STRING, 1, "null")
+ZEND_END_ARG_INFO()
+
+#define arginfo_class_Openssl_Dtls_handshake arginfo_class_Openssl_Session_getTimeout
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Dtls_feed, 0, 1, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, datagram, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+#define arginfo_class_Openssl_Dtls_pull arginfo_class_Openssl_Session_getProtocol
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_Openssl_Dtls_write, 0, 1, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, data, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+#define arginfo_class_Openssl_Dtls_read arginfo_openssl_error_string
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_class_Openssl_Dtls_exportKeys, 0, 2, MAY_BE_STRING|MAY_BE_FALSE)
+	ZEND_ARG_TYPE_INFO(0, label, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, length, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_FUNCTION(openssl_x509_export_to_file);
 ZEND_FUNCTION(openssl_x509_export);
 ZEND_FUNCTION(openssl_x509_fingerprint);
@@ -526,6 +553,14 @@ ZEND_METHOD(Openssl_Session, hasTicket);
 ZEND_METHOD(Openssl_Session, getTicketLifetimeHint);
 ZEND_METHOD(Openssl_Session, __serialize);
 ZEND_METHOD(Openssl_Session, __unserialize);
+ZEND_METHOD(Openssl_Dtls, __construct);
+ZEND_METHOD(Openssl_Dtls, getFingerprint);
+ZEND_METHOD(Openssl_Dtls, handshake);
+ZEND_METHOD(Openssl_Dtls, feed);
+ZEND_METHOD(Openssl_Dtls, pull);
+ZEND_METHOD(Openssl_Dtls, write);
+ZEND_METHOD(Openssl_Dtls, read);
+ZEND_METHOD(Openssl_Dtls, exportKeys);
 
 static const zend_function_entry ext_functions[] = {
 	ZEND_FE(openssl_x509_export_to_file, arginfo_openssl_x509_export_to_file)
@@ -619,6 +654,18 @@ static const zend_function_entry class_Openssl_Session_methods[] = {
 	ZEND_ME(Openssl_Session, getTicketLifetimeHint, arginfo_class_Openssl_Session_getTicketLifetimeHint, ZEND_ACC_PUBLIC)
 	ZEND_ME(Openssl_Session, __serialize, arginfo_class_Openssl_Session___serialize, ZEND_ACC_PUBLIC)
 	ZEND_ME(Openssl_Session, __unserialize, arginfo_class_Openssl_Session___unserialize, ZEND_ACC_PUBLIC)
+	ZEND_FE_END
+};
+
+static const zend_function_entry class_Openssl_Dtls_methods[] = {
+	ZEND_ME(Openssl_Dtls, __construct, arginfo_class_Openssl_Dtls___construct, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, getFingerprint, arginfo_class_Openssl_Dtls_getFingerprint, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, handshake, arginfo_class_Openssl_Dtls_handshake, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, feed, arginfo_class_Openssl_Dtls_feed, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, pull, arginfo_class_Openssl_Dtls_pull, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, write, arginfo_class_Openssl_Dtls_write, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, read, arginfo_class_Openssl_Dtls_read, ZEND_ACC_PUBLIC)
+	ZEND_ME(Openssl_Dtls, exportKeys, arginfo_class_Openssl_Dtls_exportKeys, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -881,6 +928,16 @@ static zend_class_entry *register_class_Openssl_Session(void)
 	zend_string *property_id_name = zend_string_init("id", sizeof("id") - 1, true);
 	zend_declare_typed_property(class_entry, property_id_name, &property_id_default_value, ZEND_ACC_PUBLIC|ZEND_ACC_READONLY, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_STRING));
 	zend_string_release_ex(property_id_name, true);
+
+	return class_entry;
+}
+
+static zend_class_entry *register_class_Openssl_Dtls(void)
+{
+	zend_class_entry ce, *class_entry;
+
+	INIT_NS_CLASS_ENTRY(ce, "Openssl", "Dtls", class_Openssl_Dtls_methods);
+	class_entry = zend_register_internal_class_with_flags(&ce, NULL, ZEND_ACC_FINAL|ZEND_ACC_NO_DYNAMIC_PROPERTIES);
 
 	return class_entry;
 }

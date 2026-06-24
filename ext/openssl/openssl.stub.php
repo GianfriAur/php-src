@@ -59,6 +59,28 @@ namespace Openssl {
         public function __unserialize(array $data): void {}
     }
 
+    /**
+     * @strict-properties
+     */
+    final class Dtls
+    {
+        public function __construct(bool $isServer = false) {}
+
+        public function getFingerprint(?string $digestAlgo = null): string {}
+
+        public function handshake(): int {}
+
+        public function feed(string $datagram): int {}
+
+        public function pull(): ?string {}
+
+        public function write(string $data): int {}
+
+        public function read(): string|false {}
+
+        public function exportKeys(string $label, int $length): string|false {}
+    }
+
 }
 
 namespace {
