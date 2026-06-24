@@ -51,6 +51,7 @@
 #include <openssl/ssl.h>
 #include <openssl/pkcs12.h>
 #include <openssl/cms.h>
+#include <openssl/srtp.h>
 
 ZEND_DECLARE_MODULE_GLOBALS(openssl)
 
@@ -545,6 +546,92 @@ static const zend_module_dep openssl_deps[] = {
 	ZEND_MOD_END
 };
 #endif
+/* {{{ Experimental DTLS smoke test: build a DTLS context, a self-signed cert,
+   compute its SHA-256 fingerprint, set the SRTP profile and memory BIOs, and
+   return a diagnostic array. */
+PHP_FUNCTION(openssl_dtls_self_test)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+	add_assoc_string(return_value, "openssl_version", OpenSSL_version(OPENSSL_VERSION));
+
+	SSL_CTX *ctx = SSL_CTX_new(DTLS_method());
+	if (ctx == NULL) {
+		add_assoc_string(return_value, "error", "SSL_CTX_new(DTLS_method) failed");
+		add_assoc_bool(return_value, "success", 0);
+		return;
+	}
+
+	EVP_PKEY *pkey = EVP_PKEY_Q_keygen(NULL, NULL, "RSA", (size_t) 2048);
+	X509 *cert = X509_new();
+	bool cert_ok = false;
+	char fingerprint[3 * EVP_MAX_MD_SIZE] = {0};
+
+	if (pkey != NULL && cert != NULL) {
+		ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
+		X509_gmtime_adj(X509_getm_notBefore(cert), 0);
+		X509_gmtime_adj(X509_getm_notAfter(cert), (long) 60 * 60 * 24 * 30);
+		X509_set_pubkey(cert, pkey);
+
+		X509_NAME *name = X509_get_subject_name(cert);
+		X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+			(const unsigned char *) "php-webrtc-dtls", -1, -1, 0);
+		X509_set_issuer_name(cert, name);
+
+		if (X509_sign(cert, pkey, EVP_sha256())) {
+			unsigned char md[EVP_MAX_MD_SIZE];
+			unsigned int md_len = 0;
+			if (X509_digest(cert, EVP_sha256(), md, &md_len)) {
+				for (unsigned int i = 0; i < md_len; i++) {
+					snprintf(fingerprint + i * 3, 4, "%02X%c",
+						md[i], (i + 1 < md_len) ? ':' : '\0');
+				}
+				cert_ok = true;
+			}
+		}
+
+		SSL_CTX_use_certificate(ctx, cert);
+		SSL_CTX_use_PrivateKey(ctx, pkey);
+	}
+	add_assoc_string(return_value, "fingerprint", fingerprint);
+
+	int srtp_ok = SSL_CTX_set_tlsext_use_srtp(ctx, "SRTP_AES128_CM_SHA1_80");
+	add_assoc_string(return_value, "use_srtp", srtp_ok == 0 ? "ok" : "fail");
+
+	SSL *ssl = SSL_new(ctx);
+	BIO *rbio = BIO_new(BIO_s_mem());
+	BIO *wbio = BIO_new(BIO_s_mem());
+	bool bio_ok = false;
+	if (ssl != NULL && rbio != NULL && wbio != NULL) {
+		SSL_set_bio(ssl, rbio, wbio);
+		SSL_set_accept_state(ssl);
+		bio_ok = true;
+	} else {
+		if (rbio != NULL) {
+			BIO_free(rbio);
+		}
+		if (wbio != NULL) {
+			BIO_free(wbio);
+		}
+	}
+	add_assoc_string(return_value, "memory_bio", bio_ok ? "ok" : "fail");
+
+	add_assoc_bool(return_value, "success", cert_ok && srtp_ok == 0 && bio_ok);
+
+	if (ssl != NULL) {
+		SSL_free(ssl);
+	}
+	if (cert != NULL) {
+		X509_free(cert);
+	}
+	if (pkey != NULL) {
+		EVP_PKEY_free(pkey);
+	}
+	SSL_CTX_free(ctx);
+}
+/* }}} */
+
 /* {{{ openssl_module_entry */
 zend_module_entry openssl_module_entry = {
 #if defined(HAVE_OPENSSL_ARGON2)

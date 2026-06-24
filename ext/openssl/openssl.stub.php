@@ -760,4 +760,7 @@ function openssl_password_hash(string $algo, #[\SensitiveParameter] string $pass
 function openssl_password_verify(string $algo, #[\SensitiveParameter] string $password, string $hash): bool {}
 #endif
 
+/** @return array<string, mixed> */
+function openssl_dtls_self_test(): array {}
+
 }
